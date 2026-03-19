@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenClaw Token Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg:    #0f1117;
+    --card:  #1a1d27;
+    --border:#2a2d3a;
+    --text:  #e2e8f0;
+    --muted: #8892a4;
+    --accent:#7c3aed;
+    --green: #10b981;
+    --blue:  #3b82f6;
+    --yellow:#f59e0b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; }
+
+  header { padding: 24px 32px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  header h1 { font-size: 22px; font-weight: 700; color: #fff; }
+  header .updated { font-size: 12px; color: var(--muted); }
+
+  main { max-width: 1200px; margin: 0 auto; padding: 24px 24px 48px; }
+
+  /* Summary cards */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px 24px; }
+  .card .label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); margin-bottom: 8px; }
+  .card .value { font-size: 28px; font-weight: 800; color: #fff; }
+  .card .sub   { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  /* Section titles */
+  .section-title { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 12px; }
+
+  /* Chart */
+  .chart-wrap { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px 24px 16px; margin-bottom: 32px; }
+  .chart-wrap canvas { max-height: 260px; }
+
+  /* Table */
+  .table-wrap { background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 32px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { background: #12141e; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); padding: 12px 16px; text-align: right; }
+  th:first-child { text-align: left; }
+  td { padding: 11px 16px; border-top: 1px solid var(--border); text-align: right; color: var(--text); }
+  td:first-child { text-align: left; font-weight: 600; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  .provider-badge { font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: rgba(124,58,237,0.2); color: var(--accent); margin-left: 6px; text-transform: uppercase; vertical-align: middle; }
+  .cost-cell { color: var(--green); font-weight: 700; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* Error state */
+  .error { color: #f87171; padding: 32px; text-align: center; }
+
+  @media (max-width: 600px) {
+    header { padding: 16px; }
+    main { padding: 16px; }
+    .card .value { font-size: 22px; }
+    th, td { padding: 10px 10px; font-size: 12px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>OpenClaw Token Dashboard</h1>
+  <span class="updated" id="updated">Loading…</span>
+</header>
+
+<main>
+  <div class="cards" id="cards"></div>
+
+  <div class="chart-wrap">
+    <div class="section-title">Daily Spend</div>
+    <canvas id="chart"></canvas>
+  </div>
+
+  <div class="section-title">Model Breakdown</div>
+  <div class="table-wrap">
+    <table id="table">
+      <thead>
+        <tr>
+          <th>Model</th>
+          <th>Calls</th>
+          <th>Input Tokens</th>
+          <th>Output Tokens</th>
+          <th>Cache Read</th>
+          <th>Cache Write</th>
+          <th>Cost (USD)</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</main>
+
+<script>
+function fmt(n)    { return n.toLocaleString(); }
+function fmtUSD(n) { return '$' + n.toFixed(4); }
+function fmtDate(s){ return new Date(s).toLocaleDateString('en-AU', {month:'short', day:'numeric'}); }
+
+const PALETTE = [
+  '#7c3aed','#3b82f6','#10b981','#f59e0b',
+  '#ef4444','#ec4899','#06b6d4','#84cc16',
+];
+
+fetch('data.json')
+  .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+  .then(render)
+  .catch(err => {
+    document.querySelector('main').innerHTML =
+      `<p class="error">Could not load data.json — run parse.py first.<br><small>${err}</small></p>`;
+  });
+
+function render(d) {
+  // Header timestamp
+  const gen = new Date(d.generated_at);
+  document.getElementById('updated').textContent =
+    'Updated ' + gen.toLocaleString('en-AU', {dateStyle:'medium', timeStyle:'short'});
+
+  // Cards
+  const t = d.totals;
+  document.getElementById('cards').innerHTML = `
+    <div class="card">
+      <div class="label">Total Spend</div>
+      <div class="value">${fmtUSD(t.cost)}</div>
+      <div class="sub">USD across all models</div>
+    </div>
+    <div class="card">
+      <div class="label">Total API Calls</div>
+      <div class="value">${fmt(t.calls)}</div>
+      <div class="sub">message entries</div>
+    </div>
+    <div class="card">
+      <div class="label">Total Tokens</div>
+      <div class="value">${fmt(t.tokens)}</div>
+      <div class="sub">input + output + cache</div>
+    </div>
+  `;
+
+  // Table
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = d.models.map(m => `
+    <tr>
+      <td>${m.model}<span class="provider-badge">${m.provider}</span></td>
+      <td class="num">${fmt(m.calls)}</td>
+      <td class="num">${fmt(m.input)}</td>
+      <td class="num">${fmt(m.output)}</td>
+      <td class="num">${fmt(m.cache_read)}</td>
+      <td class="num">${fmt(m.cache_write)}</td>
+      <td class="num cost-cell">${fmtUSD(m.cost)}</td>
+    </tr>
+  `).join('');
+
+  // Chart — group timeline by model, build date labels
+  const dates  = [...new Set(d.timeline.map(e => e.date))].sort();
+  const mkeys  = [...new Set(d.timeline.map(e => e.model))];
+
+  // cost lookup: date+model -> cost
+  const lookup = {};
+  d.timeline.forEach(e => { lookup[e.date + '|' + e.model] = e.cost; });
+
+  const datasets = mkeys.map((key, i) => ({
+    label: key,
+    data:  dates.map(date => lookup[date + '|' + key] || 0),
+    backgroundColor: PALETTE[i % PALETTE.length] + 'cc',
+    borderColor:     PALETTE[i % PALETTE.length],
+    borderWidth: 1,
+    fill: false,
+    tension: 0.3,
+    pointRadius: dates.length < 10 ? 5 : 3,
+  }));
+
+  new Chart(document.getElementById('chart'), {
+    type: 'bar',
+    data: {
+      labels: dates.map(fmtDate),
+      datasets,
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: { labels: { color: '#8892a4', font: { size: 12 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: $${ctx.parsed.y.toFixed(4)}`
+          }
+        }
+      },
+      scales: {
+        x: {
+          stacked: true,
+          ticks: { color: '#8892a4' },
+          grid:  { color: '#2a2d3a' },
+        },
+        y: {
+          stacked: true,
+          ticks: { color: '#8892a4', callback: v => '$' + v.toFixed(3) },
+          grid:  { color: '#2a2d3a' },
+        }
+      }
+    }
+  });
+}
+</script>
+</body>
+</html>
