@@ -68,6 +68,7 @@
 <header>
   <h1>OpenClaw Token Dashboard</h1>
   <span class="updated" id="updated">Loading…</span>
+  <span class="updated" id="countdown"></span>
 </header>
 
 <main>
@@ -107,13 +108,7 @@ const PALETTE = [
   '#ef4444','#ec4899','#06b6d4','#84cc16',
 ];
 
-fetch('data.json')
-  .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-  .then(render)
-  .catch(err => {
-    document.querySelector('main').innerHTML =
-      `<p class="error">Could not load data.json — run parse.py first.<br><small>${err}</small></p>`;
-  });
+let chartInstance = null;
 
 function render(d) {
   // Header timestamp
@@ -174,7 +169,7 @@ function render(d) {
     pointRadius: dates.length < 10 ? 5 : 3,
   }));
 
-  new Chart(document.getElementById('chart'), {
+  chartInstance = new Chart(document.getElementById('chart'), {
     type: 'bar',
     data: {
       labels: dates.map(fmtDate),
@@ -206,6 +201,31 @@ function render(d) {
     }
   });
 }
+
+function load() {
+  fetch('data.json?_=' + Date.now())
+    .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(d => {
+      if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+      render(d);
+      secondsLeft = 60;
+    })
+    .catch(err => {
+      document.querySelector('main').innerHTML =
+        `<p class="error">Could not load data.json — run parse.py first.<br><small>${err}</small></p>`;
+    });
+}
+
+let secondsLeft = 60;
+function tick() {
+  document.getElementById('countdown').textContent = `· refreshes in ${secondsLeft}s`;
+  if (--secondsLeft < 0) secondsLeft = 60;
+}
+
+load();
+setInterval(load, 60000);
+setInterval(tick, 1000);
+tick();
 </script>
 </body>
 </html>
