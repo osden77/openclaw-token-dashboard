@@ -28,6 +28,8 @@ for path in glob.glob(GLOB):
                 continue
 
             msg = entry.get("message", {})
+            if msg.get("role") != "assistant":
+                continue
             usage = msg.get("usage", {})
             cost_block = usage.get("cost", {})
             total_cost = cost_block.get("total", 0) or 0
